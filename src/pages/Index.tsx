@@ -10,6 +10,7 @@ import { PhotoSuggestions } from "@/components/PhotoSuggestions";
 import { Shield, Filter, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { exportInspectionPdf } from "@/lib/exportPdf";
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
 
@@ -249,7 +250,7 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
               <p className="text-[11px] text-muted-foreground font-mono">AI Safety Inspection</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" className="gap-1.5">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => exportInspectionPdf(inspection)}>
             <FileText className="h-3.5 w-3.5" />
             Export PDF
           </Button>
