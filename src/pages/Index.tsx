@@ -10,7 +10,35 @@ import { PhotoSuggestions } from "@/components/PhotoSuggestions";
 import { Shield, Filter, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
+
+const SYSTEM_PROMPT = `You are a Construction Safety Inspection Agent. You analyze jobsite photos and fill a construction safety checklist.
+
+RULES:
+- For each checklist item you can identify evidence for, return a status: YES, NO, or NA.
+- Only mark YES if you see direct positive evidence (object present, readable label, etc.).
+- Only mark NO if there is affirmative evidence of non-compliance (e.g., empty extinguisher cabinet, blocked access, clearly missing required signage in a visible area).
+- Otherwise, leave as UNKNOWN. Default to UNKNOWN rather than guessing.
+- Provide a confidence score 0-1 for each assessed item.
+- Reference which image(s) support each finding using their image_id.
+- Provide a brief snippet_text rationale for each finding.
+
+OUTPUT FORMAT:
+Return a JSON object with a "findings" array. Each finding:
+{
+  "item_id": "string (matches checklist item id, e.g. 'fire-prevention-1')",
+  "status": "YES" | "NO" | "NA",
+  "confidence": 0.0-1.0,
+  "evidence": [{
+    "image_id": "string",
+    "snippet_text": "brief rationale",
+    "detector_labels": ["label1", "label2"]
+  }]
+}
+
+Only include items where you found relevant evidence. All other items remain UNKNOWN.
+Return ONLY the JSON object, no markdown formatting.`;
 
 const createEmptyInspection = (): Inspection => ({
   id: crypto.randomUUID(),
@@ -123,13 +151,59 @@ const Index = () => {
         items: s.items.map((i) => ({ id: i.id, number: i.item_number, question: i.question_text })),
       }));
 
-      const { data, error } = await supabase.functions.invoke("analyze-site", {
-        body: { images: imageData, checklist_schema: schemaForAI },
-      });
+      if (!GEMINI_API_KEY) throw new Error("VITE_GEMINI_API_KEY is not set in .env");
 
-      if (error) throw error;
+      // Build Gemini request parts: text prompt + inline images
+      const parts: unknown[] = [
+        {
+          text: `Analyze these ${imageData.length} jobsite photo(s) against the following construction safety checklist.
 
-      const findings = data?.findings || [];
+Image IDs for reference:
+${imageData.map((img) => `- ${img.id} (${img.filename})`).join("\n")}
+
+CHECKLIST SCHEMA:
+${JSON.stringify(schemaForAI, null, 2)}
+
+Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, and any items relevant to the checklist. Return your findings as JSON.`,
+        },
+      ];
+
+      for (const img of imageData) {
+        const match = img.data_url.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
+        }
+      }
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: "user", parts }],
+            generationConfig: { responseMimeType: "application/json" },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Gemini API error ${response.status}: ${errText}`);
+      }
+
+      const geminiData = await response.json();
+      const content = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+      let findings: any[];
+      try {
+        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
+        findings = JSON.parse(jsonMatch[1].trim()).findings || [];
+      } catch {
+        console.error("Failed to parse Gemini response:", content);
+        findings = [];
+      }
 
       // Apply findings to checklist
       setInspection((prev) => {
