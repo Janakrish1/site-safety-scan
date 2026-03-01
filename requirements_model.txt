@@ -1,5 +1,6 @@
-# Requires Python 3.10+ (peft 0.18+ and fastapi 0.129+ require it)
-# Use: python3.11 -m pip install -r requirements_model.txt
+# Requires Python 3.10+ — use python3.11
+# Install:  /usr/local/opt/python@3.11/Frameworks/Python.framework/Versions/3.11/bin/pip3.11 install -r requirements_model.txt
+# Run:      python3.11 model_server.py
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 torch>=2.3.0
