@@ -7,7 +7,7 @@ import { ChecklistView } from "@/components/ChecklistView";
 import { AnalysisButton } from "@/components/AnalysisButton";
 import { CoverageMeter } from "@/components/CoverageMeter";
 import { PhotoSuggestions } from "@/components/PhotoSuggestions";
-import { Shield, Filter, FileText } from "lucide-react";
+import { Shield, Filter, FileText, Mic, MicOff, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { exportInspectionPdf } from "@/lib/exportPdf";
@@ -62,6 +62,8 @@ const Index = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [filter, setFilter] = useState<"all" | "review">("all");
   const [isUploading, setIsUploading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [voiceRemarks, setVoiceRemarks] = useState("");
   const { toast } = useToast();
 
   const updateHeader = useCallback((header: InspectionHeader) => {
@@ -288,6 +290,62 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
               />
               <CoverageMeter sections={inspection.checklist} />
               <PhotoSuggestions sections={inspection.checklist} />
+            </div>
+
+            {/* Voice remarks */}
+            <div className="rounded-lg border bg-card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Inspector Remarks</h2>
+                {voiceRemarks && (
+                  <button
+                    onClick={() => setVoiceRemarks("")}
+                    className="text-muted-foreground hover:text-destructive transition-colors"
+                    title="Clear remarks"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Mic button */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setIsRecording((r) => !r)}
+                  className={`flex items-center justify-center h-10 w-10 rounded-full border-2 transition-colors ${
+                    isRecording
+                      ? "border-red-500 bg-red-50 text-red-500"
+                      : "border-border bg-background text-muted-foreground hover:border-primary hover:text-primary"
+                  }`}
+                  title={isRecording ? "Stop recording" : "Start recording"}
+                >
+                  {isRecording ? (
+                    <MicOff className="h-4 w-4" />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </button>
+                <div className="flex-1">
+                  {isRecording ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                      <span className="text-xs text-red-500 font-medium">Recording…</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {voiceRemarks ? "Tap mic to add more" : "Tap mic to record remarks"}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Transcript area */}
+              <textarea
+                value={voiceRemarks}
+                onChange={(e) => setVoiceRemarks(e.target.value)}
+                placeholder="Voice transcript will appear here. You can also type remarks directly…"
+                rows={4}
+                className="w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
             </div>
           </div>
 
