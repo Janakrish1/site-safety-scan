@@ -7,7 +7,7 @@ import { ChecklistView } from "@/components/ChecklistView";
 import { AnalysisButton } from "@/components/AnalysisButton";
 import { CoverageMeter } from "@/components/CoverageMeter";
 import { PhotoSuggestions } from "@/components/PhotoSuggestions";
-import { Shield, Filter, FileText } from "lucide-react";
+import { Shield, Filter, FileText, Cpu, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
@@ -61,6 +61,7 @@ const Index = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [filter, setFilter] = useState<"all" | "review">("all");
   const [isUploading, setIsUploading] = useState(false);
+  const [modelChoice, setModelChoice] = useState<"gemini" | "finetuned">("gemini");
   const { toast } = useToast();
 
   const updateHeader = useCallback((header: InspectionHeader) => {
@@ -151,12 +152,28 @@ const Index = () => {
         items: s.items.map((i) => ({ id: i.id, number: i.item_number, question: i.question_text })),
       }));
 
-      if (!GEMINI_API_KEY) throw new Error("VITE_GEMINI_API_KEY is not set in .env");
+      let findings: any[];
 
-      // Build Gemini request parts: text prompt + inline images
-      const parts: unknown[] = [
-        {
-          text: `Analyze these ${imageData.length} jobsite photo(s) against the following construction safety checklist.
+      if (modelChoice === "finetuned") {
+        // ── Fine-tuned local model ──────────────────────────────────────
+        const response = await fetch("http://localhost:8000/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images: imageData, checklist_schema: schemaForAI }),
+        });
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Local model error ${response.status}: ${errText}`);
+        }
+        const data = await response.json();
+        findings = data?.findings || [];
+      } else {
+        // ── Gemini API ─────────────────────────────────────────────────
+        if (!GEMINI_API_KEY) throw new Error("VITE_GEMINI_API_KEY is not set in .env");
+
+        const parts: unknown[] = [
+          {
+            text: `Analyze these ${imageData.length} jobsite photo(s) against the following construction safety checklist.
 
 Image IDs for reference:
 ${imageData.map((img) => `- ${img.id} (${img.filename})`).join("\n")}
@@ -165,44 +182,44 @@ CHECKLIST SCHEMA:
 ${JSON.stringify(schemaForAI, null, 2)}
 
 Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, and any items relevant to the checklist. Return your findings as JSON.`,
-        },
-      ];
+          },
+        ];
 
-      for (const img of imageData) {
-        const match = img.data_url.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-          parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
+        for (const img of imageData) {
+          const match = img.data_url.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
+          }
         }
-      }
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents: [{ role: "user", parts }],
-            generationConfig: { responseMimeType: "application/json" },
-          }),
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+              contents: [{ role: "user", parts }],
+              generationConfig: { responseMimeType: "application/json" },
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini API error ${response.status}: ${errText}`);
         }
-      );
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Gemini API error ${response.status}: ${errText}`);
-      }
+        const geminiData = await response.json();
+        const content = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-      const geminiData = await response.json();
-      const content = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-      let findings: any[];
-      try {
-        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
-        findings = JSON.parse(jsonMatch[1].trim()).findings || [];
-      } catch {
-        console.error("Failed to parse Gemini response:", content);
-        findings = [];
+        try {
+          const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
+          findings = JSON.parse(jsonMatch[1].trim()).findings || [];
+        } catch {
+          console.error("Failed to parse Gemini response:", content);
+          findings = [];
+        }
       }
 
       // Apply findings to checklist
@@ -242,7 +259,7 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
     } finally {
       setIsAnalyzing(false);
     }
-  }, [inspection.images, inspection.checklist, toast]);
+  }, [inspection.images, inspection.checklist, modelChoice, toast]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -289,6 +306,40 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
 
             {/* Analysis controls */}
             <div className="space-y-3">
+              {/* Model selector */}
+              <div className="rounded-lg border bg-card p-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Analysis Model</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setModelChoice("gemini")}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors border ${
+                      modelChoice === "gemini"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:bg-muted"
+                    }`}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Gemini 2.5 Flash
+                  </button>
+                  <button
+                    onClick={() => setModelChoice("finetuned")}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors border ${
+                      modelChoice === "finetuned"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:bg-muted"
+                    }`}
+                  >
+                    <Cpu className="h-3.5 w-3.5" />
+                    Fine-tuned (Local)
+                  </button>
+                </div>
+                {modelChoice === "finetuned" && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Requires <code className="font-mono">python model_server.py</code> running on port 8000
+                  </p>
+                )}
+              </div>
+
               <AnalysisButton
                 isAnalyzing={isAnalyzing}
                 imageCount={inspection.images.length}
