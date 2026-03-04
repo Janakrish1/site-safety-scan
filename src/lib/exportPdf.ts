@@ -9,7 +9,7 @@ const STATUS_LABEL: Record<string, string> = {
   UNKNOWN: "—",
 };
 
-export function exportInspectionPdf(inspection: Inspection) {
+export function exportInspectionPdf(inspection: Inspection, remarks = "") {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const { header, checklist } = inspection;
 
@@ -122,6 +122,25 @@ export function exportInspectionPdf(inspection: Inspection) {
     head: [["Compliant (Yes)", "Non-Compliant (No)", "Not Applicable", "Unassessed"]],
     body: [[counts.YES, counts.NO, counts.NA, counts.UNKNOWN]],
   });
+
+  // ── Additional Remarks ─────────────────────────────────────────────────────
+  if (remarks.trim()) {
+    const remarksY = (doc as any).lastAutoTable.finalY + 8;
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text("Additional Remarks", margin, remarksY);
+
+    autoTable(doc, {
+      startY: remarksY + 4,
+      margin: { left: margin, right: margin },
+      theme: "grid",
+      styles: { fontSize: 9, cellPadding: 3, overflow: "linebreak" },
+      headStyles: { fillColor: [71, 85, 105], textColor: 255, fontStyle: "bold" },
+      head: [["Inspector Remarks"]],
+      body: [[remarks.trim()]],
+      columnStyles: { 0: { cellWidth: "auto" } },
+    });
+  }
 
   // ── Page numbers ───────────────────────────────────────────────────────────
   const totalPages = (doc as any).internal.getNumberOfPages();

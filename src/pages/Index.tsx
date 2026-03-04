@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type { Inspection, ChecklistItem, ImageAsset, InspectionHeader } from "@/types/inspection";
 import { createChecklistSchema } from "@/data/checklist-schema";
 import { InspectionHeaderForm } from "@/components/InspectionHeader";
@@ -62,7 +62,10 @@ const Index = () => {
   const [filter, setFilter] = useState<"all" | "review">("all");
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [voiceRemarks, setVoiceRemarks] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const { toast } = useToast();
 
   const updateHeader = useCallback((header: InspectionHeader) => {
@@ -118,6 +121,77 @@ const Index = () => {
     },
     []
   );
+
+  const toggleRecording = useCallback(async () => {
+    if (isRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      // Start recording
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunksRef.current = [];
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
+        const recorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+
+          setIsTranscribing(true);
+          try {
+            const base64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result as string;
+                resolve(result.split(",")[1]);
+              };
+              reader.readAsDataURL(audioBlob);
+            });
+
+            const response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  contents: [{
+                    parts: [
+                      { inline_data: { mime_type: mimeType, data: base64 } },
+                      { text: "Transcribe this audio exactly as spoken. Return only the transcribed text, no commentary." },
+                    ],
+                  }],
+                }),
+              }
+            );
+
+            if (!response.ok) throw new Error(`Gemini error ${response.status}`);
+            const data = await response.json();
+            const transcript = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+            if (transcript) {
+              setVoiceRemarks((prev) => prev ? `${prev} ${transcript}` : transcript);
+            }
+          } catch (err: any) {
+            toast({ title: "Transcription failed", description: err.message, variant: "destructive" });
+          } finally {
+            setIsTranscribing(false);
+          }
+        };
+
+        recorder.start();
+        setIsRecording(true);
+      } catch (err: any) {
+        toast({ title: "Microphone access denied", description: err.message, variant: "destructive" });
+      }
+    }
+  }, [isRecording, toast]);
 
   const runAnalysis = useCallback(async () => {
     if (inspection.images.length === 0) return;
@@ -251,7 +325,7 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
               <p className="text-[11px] text-muted-foreground font-mono">AI Safety Inspection</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => exportInspectionPdf(inspection)}>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => exportInspectionPdf(inspection, voiceRemarks)}>
             <FileText className="h-3.5 w-3.5" />
             Export PDF
           </Button>
@@ -308,8 +382,9 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
               {/* Mic button */}
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setIsRecording((r) => !r)}
-                  className={`flex items-center justify-center h-10 w-10 rounded-full border-2 transition-colors ${
+                  onClick={toggleRecording}
+                  disabled={isTranscribing}
+                  className={`flex items-center justify-center h-10 w-10 rounded-full border-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     isRecording
                       ? "border-red-500 bg-red-50 text-red-500"
                       : "border-border bg-background text-muted-foreground hover:border-primary hover:text-primary"
@@ -327,6 +402,11 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
                     <div className="flex items-center gap-1.5">
                       <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
                       <span className="text-xs text-red-500 font-medium">Recording…</span>
+                    </div>
+                  ) : isTranscribing ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                      <span className="text-xs text-amber-600 font-medium">Transcribing…</span>
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
