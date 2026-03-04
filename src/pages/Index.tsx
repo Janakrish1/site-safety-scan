@@ -6,7 +6,6 @@ import { ImageGallery } from "@/components/ImageGallery";
 import { ChecklistView } from "@/components/ChecklistView";
 import { AnalysisButton } from "@/components/AnalysisButton";
 import { CoverageMeter } from "@/components/CoverageMeter";
-import { PhotoSuggestions } from "@/components/PhotoSuggestions";
 import { Shield, Filter, FileText, Mic, MicOff, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -289,7 +288,6 @@ Analyze each image carefully. Identify safety equipment, signage, PPE, hazards, 
                 onClick={runAnalysis}
               />
               <CoverageMeter sections={inspection.checklist} />
-              <PhotoSuggestions sections={inspection.checklist} />
             </div>
 
             {/* Voice remarks */}
